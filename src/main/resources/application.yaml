@@ -1,0 +1,7 @@
+springdoc:
+  swagger-ui:
+    url: /openapi/openapi.yaml   # usa SEU contrato como fonte
+    path: /swagger-ui.html       # onde abrir a UI
+spring:
+  application:
+    name=mercado_libre_challenge_backend_dev
