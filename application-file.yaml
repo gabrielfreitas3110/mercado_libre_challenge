@@ -1,40 +1,34 @@
 spring:
   application:
-    name: inventory-api
+    name: inventory-api-file
 
-  jackson:
-    default-property-inclusion: non_null
-    serialization:
-      write-dates-as-timestamps: false
-
-logging:
-  level:
-    com.quickcoders.inventory.api: INFO
-    org.springframework.security: DEBUG
-    org.springframework.web: INFO
-
-server:
-  port: 8080
-
-# SpringDoc OpenAPI Configuration
-springdoc:
-  api-docs:
-    path: /api-docs
-  swagger-ui:
-    path: /swagger-ui.html
-    enabled: true
-    operations-sorter: method
-    tags-sorter: alpha
-  default-produces-media-type: application/json
-  default-consumes-media-type: application/json
-
-# Security Configuration
+# Configuração File (Persistência JSON)
 app:
   security:
     jwt:
       enabled: true
       secret: local-secret-key-change-in-production
-      expiration: 3600 # 1 hour in seconds
+      expiration: 3600
+  data:
+    file:
+      items: data/items.json
+      inventory: data/inventory.json
+      reservations: data/reservations.json
+      idempotency: data/idempotency.json
+
+# Logging para perfil file
+logging:
+  level:
+    com.quickcoders.inventory.api: INFO
+    org.springframework.security: WARN
+    org.springframework.web: WARN
+    com.quickcoders.inventory.api.repository.file: DEBUG
+
+# Cache Configuration
+app:
+  cache:
+    ttl: 8s
+    max-size: 1000
 
 # Actuator Configuration
 management:
@@ -61,3 +55,9 @@ management:
         inventory.operations.commit: true
         inventory.operations.release: true
         inventory.operations.adjust: true
+
+# Server Configuration
+server:
+  port: 8080
+  servlet:
+    context-path: /
