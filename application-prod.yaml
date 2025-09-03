@@ -1,0 +1,64 @@
+spring:
+  application:
+    name: inventory-api-prod
+
+# Configuração Produção
+app:
+  security:
+    jwt:
+      enabled: true
+      secret: ${JWT_SECRET:change-this-in-production}
+      expiration: ${JWT_EXPIRATION:3600}
+
+# Logging para produção
+logging:
+  level:
+    com.quickcoders.inventory.api: INFO
+    org.springframework.security: WARN
+    org.springframework.web: WARN
+    org.springframework.cache: WARN
+    org.springframework.scheduling: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level [%X{correlationId}] %logger{36} - %msg%n"
+
+# Cache Configuration
+app:
+  cache:
+    ttl: ${CACHE_TTL:8s}
+    max-size: ${CACHE_MAX_SIZE:10000}
+
+# Actuator Configuration
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when-authorized
+    metrics:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+        inventory.operations.reservation: true
+        inventory.operations.commit: true
+        inventory.operations.release: true
+        inventory.operations.adjust: true
+
+# Server Configuration
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    context-path: ${SERVER_CONTEXT_PATH:/}
+  compression:
+    enabled: true
+    mime-types: application/json,application/xml,text/html,text/xml,text/plain
+    min-response-size: 1024

@@ -1,0 +1,9 @@
+spring:
+  application:
+    name: inventory-api-test
+
+# Logging para testes
+logging:
+  level:
+    com.quickcoders.inventory.api: DEBUG
+    org.springframework.web: DEBUG

@@ -1,0 +1,65 @@
+# 🐳 Docker Compose - Inventory API
+
+version: '3.8'
+
+services:
+  inventory-api:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod
+      - JWT_SECRET=production-secret-key-change-this
+      - JWT_EXPIRATION=3600
+      - CACHE_TTL=8s
+      - CACHE_MAX_SIZE=10000
+    volumes:
+      - ./data:/app/data  # Para persistência de dados
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - inventory-network
+
+  # Opcional: Prometheus para métricas
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    networks:
+      - inventory-network
+    depends_on:
+      - inventory-api
+
+  # Opcional: Grafana para dashboards
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    networks:
+      - inventory-network
+    depends_on:
+      - prometheus
+
+networks:
+  inventory-network:
+    driver: bridge
+
+volumes:
+  grafana-storage:

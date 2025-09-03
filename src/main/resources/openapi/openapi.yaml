@@ -1,23 +1,215 @@
-openapi: 3.0.3
+openapi: 3.1.0
 info:
-  title: Inventory Service API
-  version: 1.0.0
+  title: Distributed Inventory API (Marketplace Brazil)
+  version: 0.1.1
   description: |
-    API para gestão de estoque com consistência lógica (optimistic locking por versão),
-    reservas com TTL e leitura de baixa latência via cache + invalidação por eventos.
-    Padrões transversais: Idempotency-Key, expectedVersion, JSON Problem Details.
-
+    OpenAPI contract for a distributed inventory system with strong-consistency writes,
+    reservation with TTL, CQRS (write canonical + read projections/cache), and idempotent
+    mutations. Suitable for a marketplace with multiple stores/sellers across Brazil.
 servers:
-  - url: http://localhost:8080
-    description: Local (dev)
-  - url: https://api.example.com/inventory
-    description: Staging/Prod (via API Gateway)
+  - url: https://api.example.com
+    description: Production
+  - url: https://staging.api.example.com
+    description: Staging
+security:
+  - bearerAuth: []
 
 tags:
-  - name: Write
-    description: Mutations de estoque (idempotentes)
-  - name: Read
-    description: Consultas de itens e disponibilidade
+  - name: Items (Write)
+  - name: Reservations (Write)
+  - name: Inventory (Read)
+
+paths:
+  /items:
+    post:
+      tags: [Items (Write)]
+      summary: Create an item (SKU)
+      operationId: createItem
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateItemRequest'
+            examples:
+              default:
+                value:
+                  sku: "SKU-123"
+                  name: "Headphone XYZ"
+                  attributes:
+                    color: "black"
+                    brand: "ACME"
+      responses:
+        '201':
+          description: Created
+          headers:
+            Location:
+              description: Resource location
+              schema: { type: string }
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Item' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    get:
+      tags: [Inventory (Read)]
+      summary: Search items (optionally scoped by store)
+      operationId: searchItems
+      parameters:
+        - in: query
+          name: storeId
+          schema: { type: string }
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 0, default: 0 }
+        - in: query
+          name: pageSize
+          schema: { type: integer, minimum: 1, maximum: 200, default: 20 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchItemsResponse' }
+
+  /items/{sku}/adjust:
+    put:
+      tags: [Items (Write)]
+      summary: Adjust inventory for an SKU in a store (conditional write)
+      operationId: adjustInventory
+      parameters:
+        - $ref: '#/components/parameters/skuPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdjustRequest' }
+      responses:
+        '200':
+          description: Inventory updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InventoryRecord' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /items/{sku}/reserve:
+    post:
+      tags: [Reservations (Write)]
+      summary: Create a reservation for an SKU (with TTL)
+      operationId: createReservation
+      parameters:
+        - $ref: '#/components/parameters/skuPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReserveRequest' }
+      responses:
+        '201':
+          description: Reservation created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Reservation' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /items/{sku}/commit:
+    post:
+      tags: [Reservations (Write)]
+      summary: Commit a reservation
+      operationId: commitReservation
+      parameters:
+        - $ref: '#/components/parameters/skuPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CommitRequest' }
+      responses:
+        '200':
+          description: Committed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InventoryRecord' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /items/{sku}/release:
+    post:
+      tags: [Reservations (Write)]
+      summary: Release a reservation
+      operationId: releaseReservation
+      parameters:
+        - $ref: '#/components/parameters/skuPath'
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReleaseRequest' }
+      responses:
+        '200':
+          description: Released
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InventoryRecord' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /items/{sku}:
+    get:
+      tags: [Inventory (Read)]
+      summary: Get item details + availability
+      operationId: getItem
+      parameters:
+        - $ref: '#/components/parameters/skuPath'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GetItemResponse' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /availability:
+    get:
+      tags: [Inventory (Read)]
+      summary: Batch read availability by SKUs
+      operationId: getAvailability
+      parameters:
+        - in: query
+          name: skus
+          required: true
+          schema:
+            type: array
+            items: { type: string }
+            style: form
+            explode: false
+        - in: query
+          name: storeId
+          required: false
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/GetAvailabilityResponse' }
 
 components:
   securitySchemes:
@@ -25,92 +217,30 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-
   parameters:
-    IdempotencyKeyHeader:
+    skuPath:
+      in: path
+      name: sku
+      required: true
+      schema: { type: string }
+    IdempotencyKey:
       in: header
       name: Idempotency-Key
       required: true
-      description: Chave de idempotência para garantir que operações de escrita não sejam aplicadas duas vezes.
-      schema:
-        type: string
-        maxLength: 128
-    StoreIdQuery:
-      in: query
-      name: storeId
+      schema: { type: string }
+    CorrelationId:
+      in: header
+      name: X-Correlation-Id
       required: false
-      description: Identificador da loja (se omitido, usa o agregado GLOBAL).
-      schema:
-        type: string
-    PaginationPage:
-      in: query
-      name: page
-      required: false
-      description: Página (base 0).
-      schema:
-        type: integer
-        minimum: 0
-        default: 0
-    PaginationSize:
-      in: query
-      name: size
-      required: false
-      description: Tamanho da página (1-200).
-      schema:
-        type: integer
-        minimum: 1
-        maximum: 200
-        default: 50
-
+      schema: { type: string }
   responses:
-    Unauthorized:
-      description: Não autenticado
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-    Forbidden:
-      description: Não autorizado
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
+    BadRequest:
+      description: Bad Request
     NotFound:
-      description: Não encontrado
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
+      description: Not Found
     Conflict:
-      description: Conflito de versão (optimistic locking) ou estado inválido
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-    UnprocessableEntity:
-      description: Erro de validação
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-    TooManyRequests:
-      description: Rate limit
-      content:
-        application/problem+json:
-          schema: { $ref: '#/components/schemas/ProblemDetails' }
-
+      description: Conflict
   schemas:
-    ProblemDetails:
-      type: object
-      description: RFC 7807 Problem Details
-      properties:
-        type: { type: string, format: uri }
-        title: { type: string }
-        status: { type: integer }
-        detail: { type: string }
-        instance: { type: string, format: uri }
-        errors:
-          type: object
-          additionalProperties:
-            type: array
-            items: { type: string }
-      required: [title, status]
-
     Item:
       type: object
       properties:
@@ -118,111 +248,9 @@ components:
         name: { type: string }
         attributes:
           type: object
-          additionalProperties: true
+          additionalProperties: { type: string }
       required: [sku, name]
-
     InventoryRecord:
-      type: object
-      properties:
-        sku: { type: string }
-        storeId:
-          type: string
-          description: Loja específica ou "GLOBAL"
-        quantityAvailable:
-          type: integer
-          minimum: 0
-        reserved:
-          type: integer
-          minimum: 0
-        version:
-          type: integer
-          minimum: 0
-        updatedAt:
-          type: string
-          format: date-time
-      required: [sku, storeId, quantityAvailable, reserved, version, updatedAt]
-
-    ItemWithAvailability:
-      type: object
-      properties:
-        item: { $ref: '#/components/schemas/Item' }
-        availability:
-          description: Disponibilidade consolidada do item (por loja ou global).
-          allOf:
-            - $ref: '#/components/schemas/InventoryRecord'
-
-    Reservation:
-      type: object
-      properties:
-        reservationId: { type: string }
-        sku: { type: string }
-        storeId: { type: string }
-        qty:
-          type: integer
-          minimum: 1
-        status:
-          type: string
-          enum: [PENDING, COMMITTED, RELEASED, EXPIRED, CANCELLED]
-        expiresAt:
-          type: string
-          format: date-time
-        createdAt:
-          type: string
-          format: date-time
-      required: [reservationId, sku, qty, status]
-
-    CreateItemRequest:
-      type: object
-      properties:
-        sku: { type: string }
-        name: { type: string }
-        attributes:
-          type: object
-          additionalProperties: true
-      required: [sku, name]
-
-    AdjustRequest:
-      type: object
-      properties:
-        storeId:
-          type: string
-          description: Se omitido, aplica no agregado GLOBAL.
-        delta:
-          type: integer
-          description: Variação do estoque disponível (pode ser negativa).
-        expectedVersion:
-          type: integer
-          description: Versão esperada para optimistic locking.
-      required: [delta, expectedVersion]
-
-    ReserveRequest:
-      type: object
-      properties:
-        qty:
-          type: integer
-          minimum: 1
-        storeId:
-          type: string
-        ttlSeconds:
-          type: integer
-          minimum: 1
-          maximum: 86400
-          description: Tempo de expiração da reserva.
-      required: [qty]
-
-    CommitRequest:
-      type: object
-      properties:
-        reservationId: { type: string }
-      required: [reservationId]
-
-    ReleaseRequest:
-      type: object
-      properties:
-        reservationId: { type: string }
-      required: [reservationId]
-
-    AvailabilityResponseItem:
       type: object
       properties:
         sku: { type: string }
@@ -232,263 +260,64 @@ components:
         version: { type: integer }
         updatedAt: { type: string, format: date-time }
       required: [sku, storeId, quantityAvailable, reserved, version, updatedAt]
-
-    PageMetadata:
+    Reservation:
       type: object
       properties:
-        page: { type: integer, minimum: 0 }
-        size: { type: integer, minimum: 1 }
-        totalElements: { type: integer, minimum: 0 }
-        totalPages: { type: integer, minimum: 0 }
-
-    ItemPage:
+        reservationId: { type: string }
+        sku: { type: string }
+        storeId: { type: string }
+        qty: { type: integer }
+        status:
+          type: string
+          enum: [CREATED, COMMITTED, RELEASED, EXPIRED]
+        expiresAt: { type: string, format: date-time }
+    CreateItemRequest:
       type: object
       properties:
-        content:
+        sku: { type: string }
+        name: { type: string }
+        attributes:
+          type: object
+          additionalProperties: { type: string }
+    AdjustRequest:
+      type: object
+      properties:
+        storeId: { type: string }
+        delta: { type: integer }
+        expectedVersion: { type: integer }
+    ReserveRequest:
+      type: object
+      properties:
+        qty: { type: integer }
+        storeId: { type: string }
+        ttlSeconds: { type: integer }
+    CommitRequest:
+      type: object
+      properties:
+        reservationId: { type: string }
+    ReleaseRequest:
+      type: object
+      properties:
+        reservationId: { type: string }
+    GetItemResponse:
+      type: object
+      properties:
+        item: { $ref: '#/components/schemas/Item' }
+        availability:
           type: array
-          items: { $ref: '#/components/schemas/ItemWithAvailability' }
-        page: { $ref: '#/components/schemas/PageMetadata' }
-
-paths:
-  /items:
-    post:
-      tags: [Write]
-      summary: Criar item
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKeyHeader'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CreateItemRequest' }
-            examples:
-              ok:
-                value: { sku: "SKU-123", name: "Tênis Azul 42", attributes: { brand: "Acme", color: "blue" } }
-      responses:
-        '201':
-          description: Item criado
-          headers:
-            Location:
-              schema: { type: string }
-              description: URL do recurso criado
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Item' }
-        '400': { $ref: '#/components/responses/UnprocessableEntity' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-        '429': { $ref: '#/components/responses/TooManyRequests' }
-
-    get:
-      tags: [Read]
-      summary: Listar/buscar itens com disponibilidade (paginado)
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - $ref: '#/components/parameters/StoreIdQuery'
-        - in: query
-          name: q
-          schema: { type: string }
-          description: Termo de busca por nome/atributos
-        - $ref: '#/components/parameters/PaginationPage'
-        - $ref: '#/components/parameters/PaginationSize'
-      responses:
-        '200':
-          description: Página de itens com disponibilidade
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ItemPage' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-
-  /items/{sku}:
-    get:
-      tags: [Read]
-      summary: Detalhe do item + disponibilidade
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - in: path
-          name: sku
-          required: true
-          schema: { type: string }
-        - $ref: '#/components/parameters/StoreIdQuery'
-      responses:
-        '200':
-          description: Item com disponibilidade
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/ItemWithAvailability' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-
-  /items/{sku}/adjust:
-    put:
-      tags: [Write]
-      summary: Ajustar estoque disponível (optimistic locking por versão)
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - in: path
-          name: sku
-          required: true
-          schema: { type: string }
-        - $ref: '#/components/parameters/IdempotencyKeyHeader'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/AdjustRequest' }
-            examples:
-              increase:
-                value: { storeId: "SP-01", delta: 10, expectedVersion: 3 }
-              decrease:
-                value: { delta: -2, expectedVersion: 7 }
-      responses:
-        '200':
-          description: Estoque ajustado
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/InventoryRecord' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-        '429': { $ref: '#/components/responses/TooManyRequests' }
-
-  /items/{sku}/reserve:
-    post:
-      tags: [Write]
-      summary: Criar reserva (incrementa `reserved`; expira por TTL)
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - in: path
-          name: sku
-          required: true
-          schema: { type: string }
-        - $ref: '#/components/parameters/IdempotencyKeyHeader'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ReserveRequest' }
-            examples:
-              basic:
-                value: { qty: 2, storeId: "GLOBAL", ttlSeconds: 900 }
-      responses:
-        '201':
-          description: Reserva criada
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Reservation' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-        '429': { $ref: '#/components/responses/TooManyRequests' }
-
-  /items/{sku}/commit:
-    post:
-      tags: [Write]
-      summary: Confirmar reserva (decrementa `quantityAvailable` e `reserved`)
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - in: path
-          name: sku
-          required: true
-          schema: { type: string }
-        - $ref: '#/components/parameters/IdempotencyKeyHeader'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/CommitRequest' }
-            examples:
-              ok:
-                value: { reservationId: "rsv_01HZW2..." }
-      responses:
-        '200':
-          description: Reserva confirmada
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Reservation' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-        '429': { $ref: '#/components/responses/TooManyRequests' }
-
-  /items/{sku}/release:
-    post:
-      tags: [Write]
-      summary: Liberar reserva (decrementa `reserved`)
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - in: path
-          name: sku
-          required: true
-          schema: { type: string }
-        - $ref: '#/components/parameters/IdempotencyKeyHeader'
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: '#/components/schemas/ReleaseRequest' }
-            examples:
-              ok:
-                value: { reservationId: "rsv_01HZW2..." }
-      responses:
-        '200':
-          description: Reserva liberada
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/Reservation' }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-        '422': { $ref: '#/components/responses/UnprocessableEntity' }
-        '429': { $ref: '#/components/responses/TooManyRequests' }
-
-  /availability:
-    get:
-      tags: [Read]
-      summary: Disponibilidade em lote (com paginação opcional)
-      security: [{ bearerAuth: [] }]
-      parameters:
-        - in: query
-          name: skus
-          required: true
-          description: Lista de SKUs separados por vírgula
-          schema:
-            type: string
-            example: SKU-123,SKU-456,SKU-789
-        - $ref: '#/components/parameters/StoreIdQuery'
-        - $ref: '#/components/parameters/PaginationPage'
-        - $ref: '#/components/parameters/PaginationSize'
-      responses:
-        '200':
-          description: Disponibilidade por SKU
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    type: array
-                    items: { $ref: '#/components/schemas/AvailabilityResponseItem' }
-                  page:
-                    $ref: '#/components/schemas/PageMetadata'
-              examples:
-                ok:
-                  value:
-                    data:
-                      - { sku: "SKU-123", storeId: "GLOBAL", quantityAvailable: 8, reserved: 2, version: 5, updatedAt: "2025-08-31T03:00:00Z" }
-                      - { sku: "SKU-456", storeId: "SP-01",  quantityAvailable: 15, reserved: 0, version: 1, updatedAt: "2025-08-31T02:50:00Z" }
-                    page: { page: 0, size: 2, totalElements: 2, totalPages: 1 }
-        '401': { $ref: '#/components/responses/Unauthorized' }
-        '403': { $ref: '#/components/responses/Forbidden' }
+          items: { $ref: '#/components/schemas/InventoryRecord' }
+    GetAvailabilityResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items: { $ref: '#/components/schemas/InventoryRecord' }
+    SearchItemsResponse:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Item' }
+        page: { type: integer }
+        pageSize: { type: integer }
+        total: { type: integer }
