@@ -15,10 +15,15 @@ import org.springframework.web.context.request.WebRequest;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    private static final Pattern VERSION_CONFLICT_PATTERN = Pattern.compile("Version conflict\\. Expected: (\\d+), Actual: (\\d+)");
+    private static final Pattern INSUFFICIENT_STOCK_PATTERN = Pattern.compile("Insufficient stock\\. Available: (\\d+), Reserved: (\\d+), Requested: (\\d+)");
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ProblemDetails> handleIllegalArgumentException(IllegalArgumentException ex, WebRequest request) {
@@ -41,13 +46,30 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ProblemDetails> handleIllegalStateException(IllegalStateException ex, WebRequest request) {
         log.warn("Illegal state exception: {}", ex.getMessage());
         
-        ProblemDetails problem = ProblemDetails.builder()
+        ProblemDetails.ProblemDetailsBuilder problemBuilder = ProblemDetails.builder()
                 .type(URI.create("https://api.example.com/problems/conflict"))
                 .title("Conflict")
                 .status(409)
                 .detail(ex.getMessage())
-                .instance(URI.create(request.getDescription(false)))
-                .build();
+                .instance(URI.create(request.getDescription(false)));
+        
+        // Extrair informações de versão se for conflito de versão
+        Matcher versionMatcher = VERSION_CONFLICT_PATTERN.matcher(ex.getMessage());
+        if (versionMatcher.find()) {
+            Long expectedVersion = Long.parseLong(versionMatcher.group(1));
+            Long actualVersion = Long.parseLong(versionMatcher.group(2));
+            problemBuilder.expectedVersion(expectedVersion)
+                         .actualVersion(actualVersion)
+                         .reason("version_conflict");
+        }
+        
+        // Extrair informações de saldo se for estoque insuficiente
+        Matcher stockMatcher = INSUFFICIENT_STOCK_PATTERN.matcher(ex.getMessage());
+        if (stockMatcher.find()) {
+            problemBuilder.reason("insufficient_stock");
+        }
+        
+        ProblemDetails problem = problemBuilder.build();
         
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .contentType(MediaType.parseMediaType("application/problem+json"))

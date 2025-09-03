@@ -23,5 +23,7 @@ public class ReserveRequest {
     @Min(value = 1, message = "TTL must be at least 1 second")
     private Long ttlSeconds;
     
+    @NotNull(message = "Expected version is required")
+    @Min(value = 1, message = "Expected version must be at least 1")
     private Long expectedVersion;
 }

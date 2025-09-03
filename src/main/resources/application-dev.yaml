@@ -2,16 +2,25 @@ spring:
   application:
     name: inventory-api-dev
 
-logging:
-  level:
-    com.quickcoders.inventory.api: DEBUG
-    org.springframework.security: DEBUG
-    org.springframework.web: DEBUG
-
-# Security Configuration - Development Profile
+# Development Profile Configuration
 app:
   security:
     jwt:
-      enabled: false  # Disable JWT validation in development
-      secret: dev-secret-key
-      expiration: 3600
+      enabled: false
+    cors:
+      allowed-origins: "*"
+      allowed-methods: "*"
+      allowed-headers: "*"
+      allow-credentials: true
+
+springdoc:
+  swagger-ui:
+    enabled: true
+
+logging:
+  level:
+    com.quickcoders.infolabsproducts: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.web: DEBUG
+    org.springframework.cache: DEBUG
+    org.springframework.scheduling: DEBUG

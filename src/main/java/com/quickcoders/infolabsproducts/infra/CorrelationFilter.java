@@ -35,9 +35,11 @@ public class CorrelationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, 
                                    FilterChain filterChain) throws ServletException, IOException {
         
+        // Generate UUID if X-Correlation-Id header is missing
         String correlationId = request.getHeader(CORRELATION_ID_HEADER);
         if (correlationId == null || correlationId.trim().isEmpty()) {
             correlationId = UUID.randomUUID().toString();
+            log.debug("Generated correlation ID: {} for request: {} {}", correlationId, request.getMethod(), request.getRequestURI());
         }
 
         long startTime = System.currentTimeMillis();

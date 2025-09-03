@@ -2,6 +2,55 @@
 
 API para gestão de estoque distribuído com consistência forte, reservas com TTL, CQRS e mutações idempotentes. Adequada para um marketplace com múltiplas lojas/vendedores em todo o Brasil.
 
+## 🎯 SLOs e KPIs
+
+### Performance
+- **Freshness do estoque**: p95 < 5s desde a última atualização canônica
+- **Latência de leitura**: p95 < 50ms (cache-first)
+- **Latência de escrita**: p95 < 150ms (otimistic locking)
+
+### Precisão
+- **Oversell**: < 0,1% (controle otimista + locks finos)
+
+### Custo Operacional
+- **Custo por requisição**: ~R$ 0,001/req (infraestrutura compartilhada)
+- **Custo mensal estimado**: R$ 500-2000/mês (dependendo do volume)
+
+### Como Medir
+
+#### Métricas Disponíveis
+```bash
+# Latência de leitura (p95)
+curl "http://localhost:8080/actuator/prometheus" | grep "http_server_requests_seconds"
+
+# Latência de escrita
+curl "http://localhost:8080/actuator/prometheus" | grep "inventory_write_latency"
+
+# Conflitos de versão
+curl "http://localhost:8080/actuator/prometheus" | grep "inventory_version_conflicts_total"
+
+# Oversell (deve ser próximo de zero)
+curl "http://localhost:8080/actuator/prometheus" | grep "inventory_oversell_conflicts_total"
+```
+
+#### Scripts de Validação
+```bash
+# Teste de concorrência (valida oversell < 0,1%)
+./scripts/concurrency_test.sh
+
+# Validação de critérios de aceite
+./scripts/validate-criteria.sh
+```
+
+#### Logs Estruturados
+```bash
+# Buscar por correlation ID
+grep "correlationId" logs/application.log | jq
+
+# Verificar latência de operações
+grep "inventory_read_latency\|inventory_write_latency" logs/application.log
+```
+
 ## 🏗️ Arquitetura
 
 ### Camadas
@@ -13,7 +62,7 @@ API para gestão de estoque distribuído com consistência forte, reservas com T
 - **infra**: Cache Caffeine, idempotency store, correlation filter, event bus
 
 ### Tecnologias
-- **Java 21**
+- **Java 17**
 - **Spring Boot 3.5.5**
 - **Maven**
 - **Caffeine Cache**
@@ -78,7 +127,7 @@ curl -X PUT http://localhost:8080/items/SKU-123/adjust \
   }'
 ```
 
-### Criar Reserva
+### Criar Reserva (com expectedVersion)
 ```bash
 curl -X POST http://localhost:8080/items/SKU-123/reserve \
   -H "Content-Type: application/json" \
@@ -92,248 +141,287 @@ curl -X POST http://localhost:8080/items/SKU-123/reserve \
   }'
 ```
 
+### Confirmar Reserva
+```bash
+curl -X POST http://localhost:8080/items/SKU-123/commit \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Idempotency-Key: key-101" \
+  -d '{
+    "reservationId": "res-123",
+    "expectedVersion": 6
+  }'
+```
+
+### Liberar Reserva
+```bash
+curl -X POST http://localhost:8080/items/SKU-123/release \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Idempotency-Key: key-102" \
+  -d '{
+    "reservationId": "res-123",
+    "expectedVersion": 6
+  }'
+```
+
 ### Buscar Itens
 ```bash
 curl -X GET "http://localhost:8080/items?q=headphone&page=0&pageSize=20" \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 ```
 
-### Verificar Disponibilidade
+## ⚠️ Tratamento de Conflitos (409)
+
+### Conflito de Versão
+Quando ocorre conflito de versão (expectedVersion ≠ actualVersion), a API retorna 409 com Problem Details:
+
+```json
+{
+  "type": "https://api.example.com/problems/conflict",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "Version conflict. Expected: 5, Actual: 6",
+  "instance": "/api/items/SKU-123/reserve",
+  "expectedVersion": 5,
+  "actualVersion": 6,
+  "reason": "version_conflict"
+}
+```
+
+**Estratégia de Retry do Cliente:**
 ```bash
-curl -X GET "http://localhost:8080/availability?skus=SKU-123,SKU-456&storeId=GLOBAL" \
+# 1. Fazer GET para obter versão atual
+curl -X GET http://localhost:8080/items/SKU-123 \
   -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+
+# Resposta: {"item": {...}, "availability": [{"version": 6, ...}]}
+
+# 2. Tentar novamente com versão correta
+curl -X POST http://localhost:8080/items/SKU-123/reserve \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Idempotency-Key: key-789-retry" \
+  -d '{
+    "qty": 2,
+    "storeId": "GLOBAL",
+    "ttlSeconds": 900,
+    "expectedVersion": 6
+  }'
+```
+
+### Estoque Insuficiente
+Quando não há estoque suficiente para reserva:
+
+```json
+{
+  "type": "https://api.example.com/problems/conflict",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "Insufficient stock. Available: 100, Reserved: 95, Requested: 10",
+  "instance": "/api/items/SKU-123/reserve",
+  "reason": "insufficient_stock"
+}
+```
+
+## 🔄 Idempotência
+
+Todas as mutações são idempotentes através do header `Idempotency-Key`. A mesma chave sempre retorna o mesmo resultado.
+
+**Exemplo de resposta idempotente:**
+```bash
+# Primeira requisição
+curl -X POST http://localhost:8080/items/SKU-123/reserve \
+  -H "Idempotency-Key: key-123" \
+  -d '{"qty": 2, "expectedVersion": 1}'
+# Retorna: 201 com reservationId: "res-abc"
+
+# Segunda requisição com mesma chave
+curl -X POST http://localhost:8080/items/SKU-123/reserve \
+  -H "Idempotency-Key: key-123" \
+  -d '{"qty": 2, "expectedVersion": 1}'
+# Retorna: 201 com reservationId: "res-abc" (mesmo resultado)
+```
+
+## 🔄 Fluxos Completos
+
+### Fluxo Reserve → Commit
+```bash
+# 1. Criar reserva
+RESPONSE=$(curl -s -X POST http://localhost:8080/items/SKU-123/reserve \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Idempotency-Key: flow-reserve-$(date +%s)" \
+  -d '{
+    "qty": 3,
+    "storeId": "SP-01",
+    "ttlSeconds": 900,
+    "expectedVersion": 1
+  }')
+
+# Extrair reservationId
+RESERVATION_ID=$(echo $RESPONSE | jq -r '.reservationId')
+
+# 2. Confirmar reserva
+curl -X POST http://localhost:8080/items/SKU-123/commit \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Idempotency-Key: flow-commit-$(date +%s)" \
+  -d "{
+    \"reservationId\": \"$RESERVATION_ID\",
+    \"expectedVersion\": 2
+  }"
+```
+
+### Fluxo Reserve → Release
+```bash
+# 1. Criar reserva
+RESPONSE=$(curl -s -X POST http://localhost:8080/items/SKU-123/reserve \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Idempotency-Key: flow-release-reserve-$(date +%s)" \
+  -d '{
+    "qty": 2,
+    "storeId": "SP-01",
+    "ttlSeconds": 900,
+    "expectedVersion": 1
+  }')
+
+# Extrair reservationId
+RESERVATION_ID=$(echo $RESPONSE | jq -r '.reservationId')
+
+# 2. Liberar reserva (antes do TTL expirar)
+curl -X POST http://localhost:8080/items/SKU-123/release \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." \
+  -H "Idempotency-Key: flow-release-$(date +%s)" \
+  -d "{
+    \"reservationId\": \"$RESERVATION_ID\",
+    \"expectedVersion\": 2
+  }"
+```
+
+## 📊 Observabilidade
+
+### Métricas Disponíveis
+- `inventory.reservations.created` - Reservas criadas
+- `inventory.reservations.committed` - Reservas confirmadas
+- `inventory.reservations.released` - Reservas liberadas
+- `inventory.reservations.expired` - Reservas expiradas
+- `inventory.conflicts.version` - Conflitos de versão
+- `inventory.conflicts.optimistic_locking` - Conflitos de lock otimista
+
+### Endpoints de Monitoramento
+- `GET /actuator/health` - Health check
+- `GET /actuator/metrics` - Métricas disponíveis
+- `GET /actuator/prometheus` - Métricas no formato Prometheus
+
+## 🔒 Segurança por Ambiente
+
+### Development (dev)
+```bash
+# Swagger UI habilitado
+# JWT desabilitado
+# CORS permissivo
+./mvnw spring-boot:run -Dspring.profiles.active=dev
+```
+
+### Production (prod)
+```bash
+# Swagger UI desabilitado
+# JWT obrigatório
+# CORS restrito
+./mvnw spring-boot:run -Dspring.profiles.active=prod
+```
+
+### Variáveis de Ambiente (Production)
+```bash
+export JWT_SECRET="your-secret-key"
+export JWT_EXPIRATION="3600"
+export CORS_ALLOWED_ORIGINS="https://api.example.com"
+export CORS_ALLOWED_METHODS="GET,POST,PUT,DELETE"
+export CORS_ALLOWED_HEADERS="Authorization,Content-Type,X-Correlation-Id,Idempotency-Key"
+export CORS_ALLOW_CREDENTIALS="false"
 ```
 
 ## 🚀 Como Executar
 
 ### Pré-requisitos
-- Java 21+
-- Maven 3.8+
-- Porta 8080 disponível
+- Java 17+
+- Maven 3.6+
 
-### Perfis de Execução
-
-#### 1. Perfil Local (In-Memory) - Padrão
-```bash
-# Execução padrão com repositórios em memória
-mvn spring-boot:run
-
-# Dados em memória, reinicia limpo a cada execução
-# Ideal para desenvolvimento e testes
-```
-
-#### 2. Perfil File (Persistência JSON)
-```bash
-# Execução com persistência em arquivos JSON
-mvn spring-boot:run -Dspring-boot.run.profiles=file
-
-# Dados persistidos em data/ (JSON)
-# Mantém dados entre reinicializações
-```
-
-#### 3. Perfil Dev (Desenvolvimento)
-```bash
-# Execução sem autenticação JWT
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
-
-# JWT desabilitado, aceita qualquer token
-# Logging DEBUG level
-```
-
-### Comandos Básicos
+### Execução Local
 ```bash
 # Compilar
 mvn clean compile
 
-# Executar testes
-mvn test
+# Executar (dev profile)
+mvn spring-boot:run -Dspring.profiles.active=dev
 
-# Iniciar aplicação (perfil local)
-mvn spring-boot:run
+# Executar (prod profile)
+mvn spring-boot:run -Dspring.profiles.active=prod
 
-# Iniciar aplicação (perfil file)
-mvn spring-boot:run -Dspring-boot.run.profiles=file
-
-# Iniciar aplicação (perfil dev)
-mvn spring-boot:run -Dspring-boot.run.profiles=dev
+# Ou usar o wrapper
+./mvnw spring-boot:run
 ```
 
-### Acesso
-- **API**: http://localhost:8080
-- **Swagger UI**: http://localhost:8080/swagger-ui.html
+### Acessar Documentação
+- **Swagger UI**: http://localhost:8080/swagger-ui.html (dev apenas)
+- **OpenAPI JSON**: http://localhost:8080/v3/api-docs (dev apenas)
 - **Health Check**: http://localhost:8080/actuator/health
-- **Métricas**: http://localhost:8080/actuator/metrics
-- **Prometheus**: http://localhost:8080/actuator/prometheus
-
-### Exemplo Rápido
-```bash
-# 1. Criar item
-curl -X POST http://localhost:8080/items \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: test-001" \
-  -d '{"sku": "TEST-001", "name": "Item Teste"}'
-
-# 2. Ajustar estoque
-curl -X PUT http://localhost:8080/items/TEST-001/adjust \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: test-002" \
-  -d '{"storeId": "STORE-01", "delta": 100}'
-
-# 3. Verificar disponibilidade
-curl -X GET "http://localhost:8080/availability?skus=TEST-001&storeId=STORE-01"
-```
-
-> 📖 **Documentação Completa**:
-> - [QUICKSTART.md](QUICKSTART.md) - Guia de execução rápida
-> - [run.md](run.md) - Exemplos detalhados e cenários de teste
-> - [CRITERIOS_ACEITE.md](CRITERIOS_ACEITE.md) - Critérios de aceite e validação
-
-### Build e Testes
-```bash
-# Build completo
-mvn clean install
-
-# Apenas testes
-mvn test
-
-# Testes com cobertura
-mvn test jacoco:report
-```
-
-### Validação dos Critérios de Aceite
-```bash
-# Windows (PowerShell)
-.\validate-criteria.ps1
-
-# Linux/Mac (Bash)
-./validate-criteria.sh
-
-# Teste de concorrência
-.\concurrency-test.ps1  # Windows
-./concurrency-test.sh   # Linux/Mac
-```
-
-## 📚 Documentação
-
-- **Swagger UI**: http://localhost:8080/swagger-ui.html
-- **OpenAPI JSON**: http://localhost:8080/api-docs
-- **OpenAPI YAML**: http://localhost:8080/openapi.yaml
-
-### Acesso à Documentação
-A documentação Swagger UI está disponível publicamente (não requer autenticação) para facilitar o desenvolvimento e testes.
-
-## 📊 Observabilidade
-
-### Métricas
-- **Health Check**: http://localhost:8080/actuator/health
-- **Métricas**: http://localhost:8080/actuator/metrics
-- **Prometheus**: http://localhost:8080/actuator/prometheus
-
-### Logging Estruturado
-- **Formato**: JSON com correlation ID
-- **Correlation ID**: Header `X-Correlation-Id` (gerado automaticamente se ausente)
-- **User ID**: Incluído nos logs quando autenticado
-
-### Métricas Disponíveis
-- **Reservas**: `inventory.reservations.created`, `inventory.reservations.committed`, `inventory.reservations.released`, `inventory.reservations.expired`
-- **Conflitos**: `inventory.conflicts.version`, `inventory.conflicts.optimistic_locking`
-- **Operações**: `inventory.operations.reservation`, `inventory.operations.commit`, `inventory.operations.release`, `inventory.operations.adjust`
-
-## 🔧 Configurações
-
-### Cache
-- **Caffeine**: Cache in-memory com expiração de 8 segundos
-- **Idempotency**: Cache com expiração de 24 horas
-- **Invalidação**: Automática por eventos de domínio
-
-### Schedulers
-- **Limpeza de Reservas**: Executa a cada minuto para remover reservas expiradas
-- **Estatísticas de Cache**: Executa a cada 5 minutos para logar métricas
-
-### Segurança
-- **JWT Bearer**: Autenticação via token Bearer
-- **CORS**: Configurado para permitir todas as origens
-- **Stateless**: Sessões stateless
-- **Perfil Dev**: JWT desabilitado para desenvolvimento
-
-### JWT Configuration
-```yaml
-app:
-  security:
-    jwt:
-      enabled: true  # false no perfil dev
-      secret: local-secret-key-change-in-production
-      expiration: 3600  # 1 hora em segundos
-```
-
-### Perfil File - Configurações de Arquivo
-```yaml
-app:
-  data:
-    file:
-      items: data/items.json
-      inventory: data/inventory.json
-      reservations: data/reservations.json
-      idempotency: data/idempotency.json
-```
-
-## 🏛️ Padrões Implementados
-
-### RFC 7807 Problem Details
-Todos os erros retornam detalhes estruturados seguindo o padrão RFC 7807.
-
-### Idempotência
-Todas as operações de escrita são idempotentes usando o header `Idempotency-Key`.
-
-### Optimistic Locking
-Ajustes de estoque usam versionamento para evitar conflitos.
-
-### Event Sourcing
-Eventos de domínio são publicados para auditoria e integração.
-
-### CQRS
-Separação entre comandos (writes) e queries (reads) com projeções otimizadas.
-
-### Cache Strategy
-- **Cache-First**: Operações de leitura verificam cache primeiro
-- **Write-Through**: Respostas são armazenadas no cache após construção
-- **Event-Driven Invalidation**: Cache invalidadado automaticamente por eventos
-- **TTL**: Expiração automática de 8 segundos para evitar dados stale
-
-### Security
-- **JWT Bearer**: Autenticação via token Bearer
-- **Stateless**: Sem sessões, cada requisição é autenticada independentemente
-- **CORS**: Configurado para desenvolvimento
-- **Problem Details**: Erros de autenticação seguem RFC 7807
 
 ## 🧪 Testes
 
-### Estrutura de Testes
-- **Unit Tests**: Testes unitários para services e repositories
-- **Integration Tests**: Testes de integração para controllers
-- **Contract Tests**: Testes de contrato OpenAPI
-
-## 📦 Deploy
-
-### Docker
 ```bash
-docker build -t inventory-api .
-docker run -p 8080:8080 inventory-api
+# Executar todos os testes
+mvn test
+
+# Executar testes de domínio
+mvn test -Dtest=*Test
+
+# Executar testes de integração
+mvn test -Dtest=*ControllerTest
+
+# Verificar cobertura
+mvn jacoco:report
 ```
 
-### Kubernetes
-```bash
-kubectl apply -f k8s/
+## 🔄 CI/CD
+
+### GitHub Actions
+O projeto inclui CI automatizado com:
+- Build e testes em JDK 17
+- Execução de scripts de validação
+- Upload de relatórios de cobertura
+- Análise de segurança
+
+### Workflow
+```yaml
+# .github/workflows/ci.yml
+- Build com Maven
+- Testes unitários e integração
+- Execução de scripts de validação
+- Upload de artifacts
 ```
 
-## 🤝 Contribuição
+## 📋 Checklist de Deploy
 
-1. Fork o projeto
-2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
-3. Commit suas mudanças (`git commit -m 'Add some AmazingFeature'`)
-4. Push para a branch (`git push origin feature/AmazingFeature`)
-5. Abra um Pull Request
+### ✅ Pré-deploy
+- [ ] Todos os testes passando
+- [ ] Cobertura de código ≥ 70%
+- [ ] Scripts de validação executados
+- [ ] Métricas configuradas
+- [ ] Logs estruturados ativos
 
-## 📄 Licença
+### ✅ Deploy
+- [ ] Profile correto (prod)
+- [ ] Variáveis de ambiente configuradas
+- [ ] JWT habilitado
+- [ ] Swagger desabilitado
+- [ ] CORS restrito
 
-Este projeto está licenciado sob a Licença MIT - veja o arquivo [LICENSE](LICENSE) para detalhes.
+### ✅ Pós-deploy
+- [ ] Health check respondendo
+- [ ] Métricas expostas
+- [ ] Logs estruturados funcionando
+- [ ] Performance dentro dos SLOs

@@ -25,6 +25,9 @@ paths:
       tags: [Items (Write)]
       summary: Create an item (SKU)
       operationId: createItem
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
       requestBody:
         required: true
         content:
@@ -89,6 +92,12 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/AdjustRequest' }
+            examples:
+              default:
+                value:
+                  storeId: "SP-01"
+                  delta: 10
+                  expectedVersion: 3
       responses:
         '200':
           description: Inventory updated
@@ -113,6 +122,13 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/ReserveRequest' }
+            examples:
+              default:
+                value:
+                  qty: 2
+                  storeId: "GLOBAL"
+                  ttlSeconds: 900
+                  expectedVersion: 5
       responses:
         '201':
           description: Reservation created
@@ -137,6 +153,11 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/CommitRequest' }
+            examples:
+              default:
+                value:
+                  reservationId: "res-123"
+                  expectedVersion: 6
       responses:
         '200':
           description: Committed
@@ -161,6 +182,11 @@ paths:
         content:
           application/json:
             schema: { $ref: '#/components/schemas/ReleaseRequest' }
+            examples:
+              default:
+                value:
+                  reservationId: "res-123"
+                  expectedVersion: 6
       responses:
         '200':
           description: Released
@@ -227,19 +253,30 @@ components:
       in: header
       name: Idempotency-Key
       required: true
-      schema: { type: string }
+      schema: { type: string, maxLength: 128 }
+      description: Required for all write operations to ensure idempotency
     CorrelationId:
       in: header
       name: X-Correlation-Id
       required: false
       schema: { type: string }
+      description: Optional correlation ID for request tracing
   responses:
     BadRequest:
       description: Bad Request
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
     NotFound:
       description: Not Found
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
     Conflict:
-      description: Conflict
+      description: Conflict (Version mismatch or insufficient stock)
+      content:
+        application/problem+json:
+          schema: { $ref: '#/components/schemas/ProblemDetails' }
   schemas:
     Item:
       type: object
@@ -285,20 +322,27 @@ components:
         storeId: { type: string }
         delta: { type: integer }
         expectedVersion: { type: integer }
+      required: [storeId, delta, expectedVersion]
     ReserveRequest:
       type: object
       properties:
         qty: { type: integer }
         storeId: { type: string }
         ttlSeconds: { type: integer }
+        expectedVersion: { type: integer }
+      required: [qty, ttlSeconds, expectedVersion]
     CommitRequest:
       type: object
       properties:
         reservationId: { type: string }
+        expectedVersion: { type: integer }
+      required: [reservationId, expectedVersion]
     ReleaseRequest:
       type: object
       properties:
         reservationId: { type: string }
+        expectedVersion: { type: integer }
+      required: [reservationId, expectedVersion]
     GetItemResponse:
       type: object
       properties:
@@ -321,3 +365,17 @@ components:
         page: { type: integer }
         pageSize: { type: integer }
         total: { type: integer }
+    ProblemDetails:
+      type: object
+      properties:
+        type: { type: string, format: uri }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string, format: uri }
+        sku: { type: string }
+        storeId: { type: string }
+        expectedVersion: { type: integer }
+        actualVersion: { type: integer }
+        reason: { type: string }
+      required: [type, title, status, detail]

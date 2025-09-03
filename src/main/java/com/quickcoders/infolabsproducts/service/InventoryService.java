@@ -112,9 +112,12 @@ public class InventoryService {
                         expectedVersion, inventoryRecord.getVersion()));
             }
             
-            if (inventoryRecord.getQuantityAvailable() < qty) {
-                throw new IllegalArgumentException("Insufficient inventory. Available: " + 
-                        inventoryRecord.getQuantityAvailable() + ", Requested: " + qty);
+            // Validar saldo disponível (quantityAvailable - reserved >= qty)
+            long availableStock = inventoryRecord.getQuantityAvailable() - inventoryRecord.getReserved();
+            if (availableStock < qty) {
+                metricsService.incrementOversellConflicts();
+                throw new IllegalStateException(String.format("Insufficient stock. Available: %d, Reserved: %d, Requested: %d", 
+                        inventoryRecord.getQuantityAvailable(), inventoryRecord.getReserved(), qty));
             }
             
             // Create reservation
@@ -148,7 +151,7 @@ public class InventoryService {
     public InventoryRecord commit(String reservationId, Long expectedVersion) {
         log.info("Committing reservation: {}, Expected Version: {}", reservationId, expectedVersion);
         
-        Timer.Sample sample = metricsService.startCommitTimer();
+        Timer.Sample sample = metricsService.startWriteLatencyTimer();
         Reservation reservation = reservationRepository.findByReservationId(reservationId)
                 .orElseThrow(() -> new IllegalArgumentException("Reservation not found: " + reservationId));
         
@@ -200,14 +203,14 @@ public class InventoryService {
             return savedRecord;
             });
         } finally {
-            metricsService.recordCommitTimer(sample);
+            metricsService.recordWriteLatencyTimer(sample);
         }
     }
 
     public InventoryRecord release(String reservationId, Long expectedVersion) {
         log.info("Releasing reservation: {}, Expected Version: {}", reservationId, expectedVersion);
         
-        Timer.Sample sample = metricsService.startReleaseTimer();
+        Timer.Sample sample = metricsService.startWriteLatencyTimer();
         Reservation reservation = reservationRepository.findByReservationId(reservationId)
                 .orElseThrow(() -> new IllegalArgumentException("Reservation not found: " + reservationId));
         
@@ -219,6 +222,10 @@ public class InventoryService {
             
             if (currentReservation.getStatus() != ReservationStatus.CREATED) {
                 throw new IllegalStateException("Reservation is not in CREATED status");
+            }
+            
+            if (currentReservation.getExpiresAt().isBefore(Instant.now())) {
+                throw new IllegalStateException("Reservation has expired");
             }
             
             // Get current inventory record
@@ -235,7 +242,7 @@ public class InventoryService {
             currentReservation.setStatus(ReservationStatus.RELEASED);
             reservationRepository.save(currentReservation);
             
-            // Update inventory (release reservation) - decrementa somente reserved
+            // Update inventory (release reservation) - decrementa apenas reserved
             InventoryRecord updatedRecord = InventoryRecord.builder()
                     .sku(currentReservation.getSku())
                     .storeId(currentReservation.getStoreId())
@@ -255,7 +262,7 @@ public class InventoryService {
             return savedRecord;
             });
         } finally {
-            metricsService.recordReleaseTimer(sample);
+            metricsService.recordWriteLatencyTimer(sample);
         }
     }
 

@@ -9,9 +9,12 @@ spring:
 
 logging:
   level:
-    com.quickcoders.inventory.api: INFO
+    com.quickcoders.infolabsproducts: INFO
     org.springframework.security: DEBUG
     org.springframework.web: INFO
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+    file: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} [%X{correlationId}] [%X{userId}] - %msg%n"
 
 server:
   port: 8080
@@ -28,13 +31,27 @@ springdoc:
   default-produces-media-type: application/json
   default-consumes-media-type: application/json
 
-# Security Configuration
+# Security Configuration (Default)
 app:
   security:
     jwt:
       enabled: true
       secret: local-secret-key-change-in-production
       expiration: 3600 # 1 hour in seconds
+    cors:
+      allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:8080}
+      allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,OPTIONS}
+      allowed-headers: ${CORS_ALLOWED_HEADERS:Authorization,Content-Type,X-Correlation-Id,Idempotency-Key}
+      allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
+
+# Inventory Configuration
+inventory:
+  idempotency:
+    ttl: PT24H # 24 hours in ISO-8601 format
+  cache:
+    ttl: 8s
+  scheduler:
+    reservation-expiry: "0 */1 * * * *" # Every minute
 
 # Actuator Configuration
 management:
@@ -51,13 +68,20 @@ management:
     prometheus:
       enabled: true
   metrics:
-    export:
-      prometheus:
-        enabled: true
     distribution:
       percentiles-histogram:
         http.server.requests: true
+        inventory_read_latency: true
+        inventory_write_latency: true
         inventory.operations.reservation: true
         inventory.operations.commit: true
         inventory.operations.release: true
         inventory.operations.adjust: true
+      percentiles:
+        http.server.requests: 0.5,0.95,0.99
+        inventory_read_latency: 0.5,0.95,0.99
+        inventory_write_latency: 0.5,0.95,0.99
+  prometheus:
+    metrics:
+      export:
+        enabled: true

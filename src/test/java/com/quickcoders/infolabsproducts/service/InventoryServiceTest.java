@@ -267,11 +267,11 @@ class InventoryServiceTest {
                 .thenReturn(Optional.of(inventoryRecord));
 
         // When & Then
-        IllegalArgumentException exception = assertThrows(IllegalArgumentException.class, () -> {
+        IllegalStateException exception = assertThrows(IllegalStateException.class, () -> {
             inventoryService.reserve(sku, storeId, qty, ttlSeconds, expectedVersion);
         });
 
-        assertTrue(exception.getMessage().contains("Insufficient inventory"));
+        assertTrue(exception.getMessage().contains("Insufficient stock"));
     }
 
     @Test
