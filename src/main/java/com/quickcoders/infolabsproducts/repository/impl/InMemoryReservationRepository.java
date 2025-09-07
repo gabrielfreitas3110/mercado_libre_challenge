@@ -1,6 +1,7 @@
 package com.quickcoders.infolabsproducts.repository.impl;
 
 import com.quickcoders.infolabsproducts.domain.Reservation;
+import com.quickcoders.infolabsproducts.domain.enums.ReservationStatus;
 import com.quickcoders.infolabsproducts.repository.ReservationRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Profile;
@@ -15,7 +16,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Repository
-@Profile("!file")
+@Profile("inmemory")
 public class InMemoryReservationRepository implements ReservationRepository {
     
     private final Map<String, Reservation> reservations = new ConcurrentHashMap<>();
@@ -40,26 +41,26 @@ public class InMemoryReservationRepository implements ReservationRepository {
     }
 
     @Override
-    public List<Reservation> findExpiredReservations(Instant before) {
+    public List<Reservation> findByStatus(ReservationStatus status) {
         return reservations.values().stream()
-                .filter(reservation -> reservation.getExpiresAt() != null && 
-                                     reservation.getExpiresAt().isBefore(before))
+                .filter(reservation -> reservation.getStatus() == status)
                 .collect(Collectors.toList());
     }
 
     @Override
-    public boolean existsByReservationId(String reservationId) {
-        return reservations.containsKey(reservationId);
+    public List<Reservation> findExpiredReservations(Instant now) {
+        return reservations.values().stream()
+                .filter(reservation -> reservation.getExpiresAt().isBefore(now) && 
+                                     (reservation.getStatus() == ReservationStatus.CREATED))
+                .collect(Collectors.toList());
     }
 
     @Override
-    public void deleteByReservationId(String reservationId) {
-        reservations.remove(reservationId);
-    }
-
-    @Override
-    public void deleteExpiredReservations(Instant before) {
-        List<String> expiredIds = findExpiredReservations(before).stream()
+    public void deleteExpiredReservations(Instant now) {
+        List<String> expiredIds = reservations.values().stream()
+                .filter(reservation -> reservation.getExpiresAt().isBefore(now) && 
+                                     (reservation.getStatus() == ReservationStatus.EXPIRED || 
+                                      reservation.getStatus() == ReservationStatus.RELEASED))
                 .map(Reservation::getReservationId)
                 .collect(Collectors.toList());
         

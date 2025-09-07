@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Repository
-@Profile("!file")
+@Profile("inmemory")
 public class InMemoryItemRepository implements ItemRepository {
     
     private final Map<String, Item> items = new ConcurrentHashMap<>();
@@ -62,7 +62,7 @@ public class InMemoryItemRepository implements ItemRepository {
         String lowerQuery = query.toLowerCase();
         return item.getName().toLowerCase().contains(lowerQuery) ||
                item.getSku().toLowerCase().contains(lowerQuery) ||
-               item.getAttributes().values().stream()
-                   .anyMatch(value -> value.toLowerCase().contains(lowerQuery));
+               (item.getAttributes() != null && item.getAttributes().values().stream()
+                   .anyMatch(value -> value.toLowerCase().contains(lowerQuery)));
     }
 }

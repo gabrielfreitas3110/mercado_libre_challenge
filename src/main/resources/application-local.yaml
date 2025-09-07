@@ -1,0 +1,41 @@
+# Local profile configuration - using PostgreSQL with JPA
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    open-in-view: false
+  datasource:
+    url: jdbc:postgresql://localhost:5432/inventory_db
+    username: postgres
+    password: postgresql
+    driver-class-name: org.postgresql.Driver
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+inventory:
+  cache:
+    ttl: 8s
+
+springdoc:
+  swagger-ui:
+    enabled: true
+
+logging:
+  level:
+    com.quickcoders.infolabsproducts: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.web: DEBUG
+    org.springframework.cache: DEBUG
+    org.springframework.scheduling: DEBUG
+
+server:
+  port: 8080
+  servlet:
+    context-path: /

@@ -41,20 +41,20 @@ public class SecurityConfig {
     }
 
     @Bean
-    @Profile("dev")
+    @Profile({"dev", "local"})
     public SecurityFilterChain devFilterChain(HttpSecurity http) throws Exception {
         http
-            .csrf(AbstractHttpConfigurer::disable)
-            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                .csrf(AbstractHttpConfigurer::disable)
+                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(authz -> authz
-                // Permitir acesso público à documentação em dev
+                // Permitir acesso público à documentação em dev/local
                 .requestMatchers("/swagger-ui/**", "/swagger-ui.html", "/api-docs/**", "/v3/api-docs/**").permitAll()
                 // Permitir acesso público ao actuator
                 .requestMatchers("/actuator/**").permitAll()
                 // Permitir acesso público ao OpenAPI JSON
                 .requestMatchers("/openapi.yaml", "/openapi.json").permitAll()
-                // Em dev, permitir acesso sem autenticação
+                // Em dev/local, permitir acesso sem autenticação para todas as rotas
                 .anyRequest().permitAll()
             )
             .httpBasic(AbstractHttpConfigurer::disable);

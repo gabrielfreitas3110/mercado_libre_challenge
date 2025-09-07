@@ -1,0 +1,46 @@
+# InMemory profile configuration - using H2 in-memory database
+spring:
+  application:
+    name: inventory-api-inmemory
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.H2Dialect
+        format_sql: true
+    open-in-view: false
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  flyway:
+    enabled: false
+
+inventory:
+  cache:
+    ttl: 8s
+
+springdoc:
+  swagger-ui:
+    enabled: true
+
+logging:
+  level:
+    com.quickcoders.infolabsproducts: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.web: DEBUG
+    org.springframework.cache: DEBUG
+    org.springframework.scheduling: DEBUG
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+

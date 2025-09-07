@@ -14,7 +14,7 @@ import java.util.stream.Collectors;
 
 @Slf4j
 @Repository
-@Profile("!file")
+@Profile("inmemory")
 public class InMemoryInventoryRepository implements InventoryRepository {
     
     private final Map<String, InventoryRecord> inventoryRecords = new ConcurrentHashMap<>();

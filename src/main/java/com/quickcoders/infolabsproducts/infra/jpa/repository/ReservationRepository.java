@@ -2,6 +2,7 @@ package com.quickcoders.infolabsproducts.infra.jpa.repository;
 
 import com.quickcoders.infolabsproducts.domain.enums.ReservationStatus;
 import com.quickcoders.infolabsproducts.infra.jpa.entity.ReservationEntity;
+import org.springframework.context.annotation.Profile;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;

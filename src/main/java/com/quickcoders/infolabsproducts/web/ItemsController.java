@@ -41,6 +41,13 @@ public class ItemsController {
         
         Item createdItem = inventoryService.createItem(item);
         
+        // If initial quantity is provided, create initial inventory record
+        if (request.getQuantityAvailable() != null && request.getQuantityAvailable() > 0) {
+            log.info("Creating initial inventory record for SKU: {} with quantity: {}", 
+                    request.getSku(), request.getQuantityAvailable());
+            inventoryService.createInitialInventory(request.getSku(), "GLOBAL", request.getQuantityAvailable());
+        }
+        
         return ResponseEntity.status(HttpStatus.CREATED)
                 .header("Location", httpRequest.getRequestURL() + "/" + createdItem.getSku())
                 .body(createdItem);

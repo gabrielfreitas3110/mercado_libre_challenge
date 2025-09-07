@@ -23,4 +23,6 @@ public class CreateItemRequest {
     private String name;
     
     private Map<String, String> attributes;
+    
+    private Long quantityAvailable;
 }

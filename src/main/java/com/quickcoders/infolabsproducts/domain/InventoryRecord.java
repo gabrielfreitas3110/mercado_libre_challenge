@@ -12,6 +12,7 @@ import java.time.Instant;
 @NoArgsConstructor
 @AllArgsConstructor
 public class InventoryRecord {
+    private Long id;
     private String sku;
     private String storeId;
     private Long quantityAvailable;

@@ -1,6 +1,7 @@
 package com.quickcoders.infolabsproducts.infra.jpa.repository;
 
 import com.quickcoders.infolabsproducts.infra.jpa.entity.InventoryRecordEntity;
+import org.springframework.context.annotation.Profile;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;

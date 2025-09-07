@@ -43,6 +43,33 @@ public class InventoryService {
         return savedItem;
     }
 
+    public InventoryRecord createInitialInventory(String sku, String storeId, Long initialQuantity) {
+        log.info("Creating initial inventory for SKU: {}, Store: {}, Quantity: {}", sku, storeId, initialQuantity);
+        
+        // Check if inventory record already exists
+        List<InventoryRecord> existingRecords = inventoryRepository.findBySku(sku);
+        boolean recordExists = existingRecords.stream()
+                .anyMatch(record -> record.getStoreId().equals(storeId));
+        
+        if (recordExists) {
+            throw new IllegalArgumentException("Inventory record for SKU " + sku + " and store " + storeId + " already exists");
+        }
+        
+        InventoryRecord initialRecord = InventoryRecord.builder()
+                .sku(sku)
+                .storeId(storeId)
+                .quantityAvailable(initialQuantity)
+                .reserved(0L)
+                .version(0L)
+                .updatedAt(Instant.now())
+                .build();
+        
+        InventoryRecord savedRecord = inventoryRepository.save(initialRecord);
+        eventBus.publish(new InventoryAdjustedEvent(savedRecord, initialQuantity));
+        
+        return savedRecord;
+    }
+
     public InventoryRecord adjust(Adjustment adjustment) {
         log.info("Adjusting inventory for SKU: {}, Store: {}, Delta: {}, Expected Version: {}", 
                 adjustment.getSku(), adjustment.getStoreId(), adjustment.getDelta(), adjustment.getExpectedVersion());
@@ -393,6 +420,7 @@ public class InventoryService {
 
     private InventoryRecord createInitialRecord(String sku, String storeId) {
         return InventoryRecord.builder()
+                .id(null) // Will be set by JPA
                 .sku(sku)
                 .storeId(storeId)
                 .quantityAvailable(0L)
@@ -404,6 +432,7 @@ public class InventoryService {
 
     private void updateInventoryReserved(InventoryRecord inventoryRecord, Long qty) {
         InventoryRecord updatedRecord = InventoryRecord.builder()
+                .id(inventoryRecord.getId())
                 .sku(inventoryRecord.getSku())
                 .storeId(inventoryRecord.getStoreId())
                 .quantityAvailable(inventoryRecord.getQuantityAvailable())

@@ -1,13 +1,13 @@
 spring:
   application:
     name: inventory-api
-
   jackson:
     default-property-inclusion: non_null
     serialization:
       write-dates-as-timestamps: false
+  profiles:
+    active: local
 
-  # Database Configuration
   datasource:
     url: jdbc:postgresql://localhost:5432/inventory_db
     username: postgres
@@ -41,7 +41,6 @@ logging:
 server:
   port: 8080
 
-# SpringDoc OpenAPI Configuration
 springdoc:
   api-docs:
     path: /api-docs
@@ -53,29 +52,14 @@ springdoc:
   default-produces-media-type: application/json
   default-consumes-media-type: application/json
 
-# Security Configuration (Default)
-app:
-  security:
-    jwt:
-      enabled: true
-      secret: local-secret-key-change-in-production
-      expiration: 3600 # 1 hour in seconds
-    cors:
-      allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:8080}
-      allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,DELETE,OPTIONS}
-      allowed-headers: ${CORS_ALLOWED_HEADERS:Authorization,Content-Type,X-Correlation-Id,Idempotency-Key}
-      allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
-
-# Inventory Configuration
 inventory:
   idempotency:
-    ttl: PT24H # 24 hours in ISO-8601 format
+    ttl: PT24H
   cache:
     ttl: 8s
   scheduler:
-    reservation-expiry: "0 */1 * * * *" # Every minute
+    reservation-expiry: "0 */1 * * * *"
 
-# Actuator Configuration
 management:
   endpoints:
     web:
@@ -107,3 +91,15 @@ management:
     metrics:
       export:
         enabled: true
+
+app:
+  security:
+    jwt:
+      enabled: false
+      secret: local-secret-key-change-in-production
+      expiration: 3600
+    cors:
+      allowed-origins: "*"
+      allowed-methods: "*"
+      allowed-headers: "*"
+      allow-credentials: true

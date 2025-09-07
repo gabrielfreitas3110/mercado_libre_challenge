@@ -1,0 +1,42 @@
+# Homolog profile configuration - using DynamoDB
+spring:
+  application:
+    name: inventory-api-homolog
+  jpa:
+    hibernate:
+      ddl-auto: none
+  datasource:
+    url: jdbc:h2:mem:testdb
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: 
+  flyway:
+    enabled: false
+
+# DynamoDB Configuration (to be implemented)
+aws:
+  dynamodb:
+    endpoint: ${DYNAMODB_ENDPOINT:http://localhost:8000}
+    region: ${AWS_REGION:us-east-1}
+    access-key: ${AWS_ACCESS_KEY_ID:local}
+    secret-key: ${AWS_SECRET_ACCESS_KEY:local}
+
+inventory:
+  cache:
+    ttl: 8s
+
+springdoc:
+  swagger-ui:
+    enabled: true
+
+logging:
+  level:
+    com.quickcoders.infolabsproducts: INFO
+    org.springframework.security: WARN
+    org.springframework.web: WARN
+
+server:
+  port: 8080
+  servlet:
+    context-path: /
+

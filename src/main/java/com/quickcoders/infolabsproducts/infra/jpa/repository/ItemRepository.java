@@ -1,6 +1,7 @@
 package com.quickcoders.infolabsproducts.infra.jpa.repository;
 
 import com.quickcoders.infolabsproducts.infra.jpa.entity.ItemEntity;
+import org.springframework.context.annotation.Profile;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -21,4 +22,6 @@ public interface ItemRepository extends JpaRepository<ItemEntity, String> {
     List<ItemEntity> findByAttributeKeyAndValueContaining(@Param("key") String key, @Param("value") String value);
     
     boolean existsBySku(String sku);
+    
+    void deleteBySku(String sku);
 }

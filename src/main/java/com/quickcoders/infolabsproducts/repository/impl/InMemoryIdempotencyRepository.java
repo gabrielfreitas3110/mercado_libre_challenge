@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 @Slf4j
 @Repository
-@Profile("!file")
+@Profile("inmemory")
 public class InMemoryIdempotencyRepository implements IdempotencyRepository {
     
     private final Map<String, IdempotencyEntry> idempotencyCache = new ConcurrentHashMap<>();
@@ -59,6 +59,10 @@ public class InMemoryIdempotencyRepository implements IdempotencyRepository {
         
         public String getResult() {
             return result;
+        }
+        
+        public Instant getCreatedAt() {
+            return createdAt;
         }
         
         public boolean isExpired() {
